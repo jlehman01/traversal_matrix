@@ -1,0 +1,96 @@
+---
+title: "Traversal Matrix"
+author: "Renaissance Planning"
+date: "12/8/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(sf)
+library(tidyr)
+library(dplyr)
+library(mapview)
+```
+
+
+```{r read in data}
+
+cordon_line <- st_read("K:\\Projects\\WILMAPCO\\Features\\Model\\cordon_line\\cordon_line.shp", quiet = TRUE) %>% 
+  st_transform(2283)
+
+subarea_zones_for_cordon <- st_read("K:\\Projects\\WILMAPCO\\Features\\Model\\cordon_line\\subareas_for_cordon_line_clipped.shp", quiet = TRUE) %>% 
+  st_transform(2283)
+
+nodes <- st_read("K:\\Projects\\WILMAPCO\\Features\\Model\\scenarios\\ModelRuns\\v2\\2050_TP3_BAU_Loaded_Node.shp", quiet = TRUE) %>% 
+  st_transform(2283)
+
+network_links_tp1_c_50 <- st_read("K:\\Projects\\WILMAPCO\\Features\\Model\\scenarios\\ModelRuns\\v2\\2050_TP1_C_Loaded_Link.shp", quiet = TRUE) %>% 
+  st_transform(2283) %>% 
+  mutate(scenario = "tp1_c_50")
+  
+network_links_tp1_bau_50 <- st_read("K:\\Projects\\WILMAPCO\\Features\\Model\\scenarios\\ModelRuns\\v2\\2050_TP1_BAU_Loaded_Link.shp", quiet = TRUE) %>% 
+  st_transform(2283) %>% 
+  mutate(scenario = "tp1_bau_50")
+
+network_links_tp2_c_50 <- st_read("K:\\Projects\\WILMAPCO\\Features\\Model\\scenarios\\ModelRuns\\v2\\2050_TP2_C_Loaded_Link.shp", quiet = TRUE) %>% 
+  st_transform(2283) %>% 
+  mutate(scenario = "tp2_c_50")
+
+network_links_tp3_c_50 <- st_read("K:\\Projects\\WILMAPCO\\Features\\Model\\scenarios\\ModelRuns\\v2\\2050_TP3_C_Loaded_Link.shp", quiet = TRUE) %>% 
+  st_transform(2283) %>% 
+  mutate(scenario = "tp3_c_50")
+
+network_links_tp2_bau_50 <- st_read("K:\\Projects\\WILMAPCO\\Features\\Model\\scenarios\\ModelRuns\\v2\\2050_TP2_BAU_Loaded_Link.shp", quiet = TRUE) %>% 
+  st_transform(2283) %>% 
+  mutate(scenario = "tp2_bau_50")
+
+network_links_tp3_bau_50 <- st_read("K:\\Projects\\WILMAPCO\\Features\\Model\\scenarios\\ModelRuns\\v2\\2050_TP3_BAU_Loaded_Link.shp", quiet = TRUE) %>% 
+  st_transform(2283) %>% 
+  mutate(scenario = "tp3_bau_50")
+
+network_links_base_2019 <- st_read("K:\\Projects\\WILMAPCO\\Features\\Model\\scenarios\\ModelRuns\\v2\\2019_Base_Loaded_Link.shp", quiet = TRUE) %>% 
+  st_transform(2283) %>% 
+  mutate(scenario = "base_2019")
+
+networks_merged <- bind_rows(network_links_tp1_c_50, network_links_tp1_bau_50, network_links_tp2_c_50, network_links_tp3_c_50, network_links_tp2_bau_50, network_links_tp3_bau_50, network_links_base_2019)
+
+rm(network_links_tp1_c_50, network_links_tp1_bau_50, network_links_tp2_c_50, network_links_tp3_c_50, network_links_tp2_bau_50, network_links_tp3_bau_50, network_links_base_2019)
+
+```
+
+```{r process data}
+
+#select links that cross cordon line
+cordon_line_links <- st_filter(networks_merged, 
+                               cordon_line, .predicate = st_crosses)
+
+#identify subarea that nodes are in
+centroid_area_lookup <- st_join(select(nodes, N), subarea_zones_for_cordon,
+                          join = st_intersects) %>% 
+                        st_drop_geometry() %>% 
+                        mutate(subareaRP = replace_na(subareaRP, 0))
+
+#add subareas to links
+cordon_line_links_w_subarea <- cordon_line_links %>% 
+  filter()
+  left_join(centroid_area_lookup, by = c("A" = "N")) %>% 
+  rename(A_subareaRP = subareaRP) %>% 
+  left_join(centroid_area_lookup, by = c("B" = "N")) %>% 
+  rename(B_subareaRP = subareaRP) %>% 
+  mutate(flow = case_when(
+    B_subareaRP >0 & A_subareaRP == 0 ~ "entering_subarea",
+    B_subareaRP == 0 & A_subareaRP > 0 ~ "leaving_subarea",
+    B_subareaRP > 0 & A_subareaRP > 0 & B_subareaRP == A_subareaRP ~ "within_subarea",
+    B_subareaRP > 0 & A_subareaRP > 0 & B_subareaRP == A_subareaRP ~ "between_subareas"))
+
+mapview(subarea_zones_for_cordon, zcol = "subareaRP") + mapview(cordon_line_links_w_subarea, zcol = "flow") + mapview(cordon_line)
+
+cordon_line_flows_summarized <- cordon_line_links_w_subarea %>% 
+  group_by(flow, A_subareaRP, B_subareaRP)
+
+```
+
